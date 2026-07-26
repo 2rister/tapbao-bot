@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+storage/cache/
+storage/taobao-profile/
+storage/logs/
+npm-debug.log*
