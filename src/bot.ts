@@ -1,19 +1,36 @@
-import { Telegraf } from 'telegraf';
+import { Telegraf, Markup } from 'telegraf';
 import { InputMediaPhoto } from 'telegraf/typings/core/types/typegram';
 import { config } from './config';
 import { extractTaobaoUrl } from './taobao/parseUrl';
 import { getProductInEnglish } from './pipeline';
+import { closeSharedBrowser } from './taobao/scraper';
 import { buildInfoMessage, buildReviewsMessage } from './format';
+
+const restartKeyboard = Markup.keyboard([['🔄 Restart']]).resize();
 
 export function createBot(): Telegraf {
   const bot = new Telegraf(config.telegramBotToken);
 
+  const isOwner = (userId: number | undefined) =>
+    config.telegramOwnerId !== null && userId === config.telegramOwnerId;
+
   bot.start((ctx) =>
     ctx.reply(
       'Send me a Taobao or Tmall product link and I will reply with the photos, ' +
-        'an English description, and the 5 latest reviews translated to English.'
+        'an English description, and the 5 latest reviews translated to English.',
+      isOwner(ctx.from?.id) ? restartKeyboard : undefined
     )
   );
+
+  bot.hears(['🔄 Restart', '/restart'], async (ctx) => {
+    if (!isOwner(ctx.from?.id)) {
+      await ctx.reply('Not authorized.');
+      return;
+    }
+    await ctx.reply('Restarting the browser session…');
+    await closeSharedBrowser();
+    await ctx.reply('Done — the next request will start a fresh browser session.');
+  });
 
   bot.on('text', async (ctx) => {
     const url = extractTaobaoUrl(ctx.message.text);
