@@ -15,9 +15,10 @@ directly with a real browser (Playwright) rather than a paid data API.
 
 1. You paste a `item.taobao.com` / `detail.tmall.com` / `tb.cn` link into the
    chat.
-2. The bot resolves the link, opens it in a headless Chromium (Playwright),
-   and scrapes the title, gallery images, attributes table, description text,
-   and (best-effort) the review list.
+2. The bot resolves the link and scrapes the title, gallery images,
+   attributes table, description text, and (best-effort) the review list
+   using a headless Chromium (Playwright) that stays running and logged in
+   across requests, instead of relaunching for every message.
 3. All Chinese text is translated to English via the Azure Translator API.
 4. Everything is cached on disk per product id for `CACHE_TTL_HOURS` (default
    12h), so re-sharing the same link doesn't re-scrape Taobao or re-spend
@@ -62,11 +63,12 @@ Run this once, locally, with a visible window:
 npx ts-node scripts/save-login-state.ts
 ```
 
-It opens a real browser to the Taobao login page — scan the QR code with the
-Taobao app, then press Enter in the terminal. This saves cookies to
-`storage/taobao-state.json`, which the bot then reuses automatically
-(`TAOBAO_STORAGE_STATE_PATH` in `.env`). Re-run this occasionally if the
-session expires.
+It opens a real browser to the Taobao login page, using the same persistent
+Chromium profile the bot itself uses (`storage/taobao-profile/` by default,
+`TAOBAO_PROFILE_DIR` in `.env`) — scan the QR code with the Taobao app, then
+press Enter in the terminal. The bot picks up the session automatically on
+its next scrape, no file to copy. Re-run this occasionally if the session
+expires.
 
 ### 5. Run
 

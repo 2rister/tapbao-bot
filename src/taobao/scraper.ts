@@ -1,5 +1,4 @@
-import fs from 'fs';
-import { chromium, Page, Response as PWResponse } from 'playwright';
+import { chromium, BrowserContext, Page, Response as PWResponse } from 'playwright';
 import { config } from '../config';
 import { extractItemId } from './parseUrl';
 
@@ -143,9 +142,9 @@ async function collectReviewsFromNetwork(page: Page): Promise<ScrapedReview[]> {
   return reviews.slice(0, 5);
 }
 
-async function collectImages(page: Page): Promise<string[]> {
-  const raw = await page.$$eval('img', (imgs) =>
-    imgs.map((img) => (img as HTMLImageElement).currentSrc || img.src)
+async function extractImgSrcs(page: Page, selector: string): Promise<string[]> {
+  const raw = await page.$$eval(selector, (imgs) =>
+    (imgs as HTMLImageElement[]).map((img) => img.currentSrc || img.src)
   );
 
   const normalize = (src: string) => (src.startsWith('//') ? `https:${src}` : src);
@@ -157,11 +156,59 @@ async function collectImages(page: Page): Promise<string[]> {
     .map((src) => src.replace(/_\d+x\d+.*?\.(jpg|jpeg|png|webp)/i, '.$1'))
     .filter((src) => !/logo|icon|sprite|blank\.gif/i.test(src));
 
-  return Array.from(new Set(cleaned)).slice(0, 9);
+  return Array.from(new Set(cleaned));
+}
+
+// Taobao's CSS-module class hashes (the part after "--") rotate on every
+// frontend deploy, but the semantic prefix tends to stay stable, so we
+// match on that prefix instead of a full hardcoded class name.
+const GALLERY_SELECTORS = [
+  '#picGalleryEle img',
+  '[class*="picGallery--"] img',
+  '[class*="PicGallery--"] img',
+];
+
+/** Fallback when the network-intercepted review API can't be found: read the rendered review cards directly. */
+async function collectReviewsFromDom(page: Page): Promise<ScrapedReview[]> {
+  try {
+    const cards = await page.$$eval('[class*="Comment--"]', (nodes) =>
+      nodes.slice(0, 5).map((node) => {
+        const author = node.querySelector('[class*="userName--"]')?.textContent?.trim();
+        const content = node.querySelector('[class*="content--"]')?.textContent?.trim();
+        return { author, content };
+      })
+    );
+    return cards
+      .filter((c) => !!c.content && c.content.length > 1)
+      .map((c) => ({ content: c.content as string, author: c.author || undefined }));
+  } catch {
+    return [];
+  }
+}
+
+async function collectImages(page: Page): Promise<string[]> {
+  for (const selector of GALLERY_SELECTORS) {
+    try {
+      const found = await extractImgSrcs(page, selector);
+      if (found.length > 0) return found.slice(0, 9);
+    } catch {
+      // try next selector
+    }
+  }
+  // Fallback: scan every <img> on the page.
+  return extractImgSrcs(page, 'img')
+    .then((list) => list.slice(0, 9))
+    .catch(() => []);
 }
 
 async function collectProps(page: Page): Promise<{ name: string; value: string }[]> {
-  const selectors = ['#J_AttrUL li', '.attributes-list li', '.tb-key', 'ul.attributes-list li'];
+  const selectors = [
+    '#J_AttrUL li',
+    '.attributes-list li',
+    '.tb-key',
+    'ul.attributes-list li',
+    '[class*="skuItem--"]',
+  ];
   for (const selector of selectors) {
     try {
       const items = await page.$$eval(selector, (nodes) =>
@@ -185,7 +232,7 @@ async function collectProps(page: Page): Promise<{ name: string; value: string }
 }
 
 async function collectDescriptionParagraphs(page: Page): Promise<string[]> {
-  const selectors = ['#description', '.detail-content', '#J_DivItemDesc'];
+  const selectors = ['#description', '.detail-content', '#J_DivItemDesc', '[class*="desc-root"]'];
   for (const selector of selectors) {
     try {
       const frame = page
@@ -209,17 +256,46 @@ async function collectDescriptionParagraphs(page: Page): Promise<string[]> {
   return [];
 }
 
-export async function scrapeTaobaoProduct(url: string): Promise<ScrapedProduct> {
-  const browser = await chromium.launch({ headless: config.playwrightHeadless });
-  const hasStorageState = fs.existsSync(config.taobaoStorageStatePath);
+// A persistent browser context is launched once and reused across every
+// scrape call (each call still gets its own Page, so concurrent requests
+// from different Telegram users don't step on each other). This avoids
+// paying Chromium's ~1-2s startup cost on every message and, since the
+// context's profile directory persists to disk, keeps a Taobao login
+// session alive across requests and bot restarts.
+let sharedContext: BrowserContext | null = null;
 
-  const context = await browser.newContext({
+async function getSharedContext(): Promise<BrowserContext> {
+  if (sharedContext) {
+    const alive = await sharedContext
+      .pages()[0]
+      ?.evaluate(() => 1)
+      .then(() => true)
+      .catch(() => false);
+    if (alive !== false) return sharedContext;
+    sharedContext = null;
+  }
+
+  sharedContext = await chromium.launchPersistentContext(config.taobaoProfileDir, {
+    headless: config.playwrightHeadless,
     userAgent: USER_AGENT,
     viewport: { width: 1366, height: 900 },
     locale: 'zh-CN',
-    storageState: hasStorageState ? config.taobaoStorageStatePath : undefined,
+    proxy: config.playwrightProxyServer ? { server: config.playwrightProxyServer } : undefined,
+    ignoreHTTPSErrors: config.playwrightIgnoreHttpsErrors,
   });
+  return sharedContext;
+}
 
+/** Call on process shutdown to flush the persistent profile and close Chromium cleanly. */
+export async function closeSharedBrowser(): Promise<void> {
+  if (sharedContext) {
+    await sharedContext.close().catch(() => undefined);
+    sharedContext = null;
+  }
+}
+
+export async function scrapeTaobaoProduct(url: string): Promise<ScrapedProduct> {
+  const context = await getSharedContext();
   const page = await context.newPage();
 
   try {
@@ -236,16 +312,18 @@ export async function scrapeTaobaoProduct(url: string): Promise<ScrapedProduct> 
       .then((t) => t?.trim() || '')
       .catch(() => '');
 
-    const [images, props, descriptionParagraphs, reviews] = await Promise.all([
+    const [images, props, descriptionParagraphs, networkReviews] = await Promise.all([
       collectImages(page).catch(() => []),
       collectProps(page).catch(() => []),
       collectDescriptionParagraphs(page).catch(() => []),
       collectReviewsFromNetwork(page).catch(() => []),
     ]);
 
+    const reviews =
+      networkReviews.length > 0 ? networkReviews : await collectReviewsFromDom(page).catch(() => []);
+
     return { itemId, finalUrl, title, images, props, descriptionParagraphs, reviews };
   } finally {
-    await context.close();
-    await browser.close();
+    await page.close().catch(() => undefined);
   }
 }

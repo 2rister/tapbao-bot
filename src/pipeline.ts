@@ -1,3 +1,4 @@
+import { config } from './config';
 import { extractItemId } from './taobao/parseUrl';
 import { scrapeTaobaoProduct, ScrapedProduct } from './taobao/scraper';
 import { translateToEnglish } from './translate/azureTranslate';
@@ -13,7 +14,24 @@ export interface ProductResult {
   reviews: { author?: string; date?: string; content: string }[];
 }
 
+function withoutTranslation(scraped: ScrapedProduct): ProductResult {
+  return {
+    itemId: scraped.itemId,
+    sourceUrl: scraped.finalUrl,
+    title: scraped.title,
+    images: scraped.images,
+    props: scraped.props,
+    descriptionParagraphs: scraped.descriptionParagraphs,
+    reviews: scraped.reviews,
+  };
+}
+
 async function translateProduct(scraped: ScrapedProduct): Promise<ProductResult> {
+  if (!config.azureTranslatorKey) {
+    console.warn('AZURE_TRANSLATOR_KEY not set - skipping translation, returning original text.');
+    return withoutTranslation(scraped);
+  }
+
   const propNames = scraped.props.map((p) => p.name);
   const propValues = scraped.props.map((p) => p.value);
   const reviewContents = scraped.reviews.map((r) => r.content);

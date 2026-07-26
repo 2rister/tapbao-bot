@@ -1,4 +1,5 @@
 import { createBot } from './bot';
+import { closeSharedBrowser } from './taobao/scraper';
 
 const bot = createBot();
 
@@ -6,5 +7,11 @@ bot.launch().then(() => {
   console.log('tapbao-bot is running');
 });
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+async function shutdown(signal: string) {
+  bot.stop(signal);
+  await closeSharedBrowser();
+  process.exit(0);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));

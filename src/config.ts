@@ -12,17 +12,31 @@ function required(name: string): string {
 export const config = {
   telegramBotToken: required('TELEGRAM_BOT_TOKEN'),
 
-  azureTranslatorKey: required('AZURE_TRANSLATOR_KEY'),
+  // Optional: if unset, translation is skipped and original (Chinese) text
+  // is returned as-is instead of failing the whole request.
+  azureTranslatorKey: process.env.AZURE_TRANSLATOR_KEY || '',
   azureTranslatorRegion: process.env.AZURE_TRANSLATOR_REGION || 'global',
   azureTranslatorEndpoint:
     process.env.AZURE_TRANSLATOR_ENDPOINT ||
     'https://api.cognitive.microsofttranslator.com',
 
-  taobaoStorageStatePath: process.env.TAOBAO_STORAGE_STATE_PATH
-    ? path.resolve(process.env.TAOBAO_STORAGE_STATE_PATH)
-    : path.resolve('./storage/taobao-state.json'),
+  // Persistent Chromium profile dir: cookies/login survive across requests
+  // and bot restarts, and the browser process itself is kept alive between
+  // requests instead of being relaunched for every message.
+  taobaoProfileDir: process.env.TAOBAO_PROFILE_DIR
+    ? path.resolve(process.env.TAOBAO_PROFILE_DIR)
+    : path.resolve('./storage/taobao-profile'),
 
   playwrightHeadless: process.env.PLAYWRIGHT_HEADLESS !== 'false',
+
+  // Optional HTTP(S) proxy for the scraping browser, e.g. when running
+  // behind a corporate/sandbox proxy. Defaults to the standard HTTPS_PROXY
+  // env var if set.
+  playwrightProxyServer: process.env.PLAYWRIGHT_PROXY_SERVER || process.env.HTTPS_PROXY || '',
+
+  // Only needed behind a TLS-intercepting proxy (e.g. a sandboxed dev
+  // environment) whose CA Chromium doesn't trust. Leave off in production.
+  playwrightIgnoreHttpsErrors: process.env.PLAYWRIGHT_IGNORE_HTTPS_ERRORS === 'true',
 
   cacheTtlHours: Number(process.env.CACHE_TTL_HOURS || 12),
 
