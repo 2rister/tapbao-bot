@@ -322,10 +322,30 @@ export async function closeSharedBrowser(): Promise<void> {
   }
 }
 
+// Taobao redirects overseas IPs away from the real item page to an
+// international/account-binding page via a client-side `window.location`
+// change, not a real HTTP redirect. That reassignment still fires
+// `beforeunload`, so registering a handler for it makes the browser ask for
+// confirmation before the navigation proceeds - and Playwright auto-dismisses
+// unhandled dialogs, which cancels the navigation and keeps the real page.
+async function installOverseasRedirectBlocker(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.addEventListener(
+      'beforeunload',
+      (event) => {
+        event.preventDefault();
+        event.returnValue = '';
+      },
+      { capture: true }
+    );
+  });
+}
+
 export async function scrapeTaobaoProduct(url: string): Promise<ScrapedProduct> {
   const context = await getSharedContext();
   const page = await context.newPage();
   const targetUrl = await resolveShortLink(url);
+  await installOverseasRedirectBlocker(page);
 
   try {
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
