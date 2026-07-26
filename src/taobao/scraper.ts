@@ -218,14 +218,14 @@ async function collectImages(page: Page): Promise<string[]> {
   for (const selector of GALLERY_SELECTORS) {
     try {
       const found = await extractImgSrcs(page, selector);
-      if (found.length > 0) return found.slice(0, 9);
+      if (found.length > 0) return found.slice(0, 20);
     } catch {
       // try next selector
     }
   }
   // Fallback: scan every <img> on the page.
   return extractImgSrcs(page, 'img')
-    .then((list) => list.slice(0, 9))
+    .then((list) => list.slice(0, 20))
     .catch(() => []);
 }
 

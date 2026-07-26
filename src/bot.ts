@@ -42,15 +42,21 @@ export function createBot(): Telegraf {
     const statusMessage = await ctx.reply('Fetching product info, this can take a bit…');
 
     try {
-      const product = await getProductInEnglish(url);
+      const product = await getProductInEnglish(url, ctx.message.text);
 
       if (product.images.length > 0) {
-        const media: InputMediaPhoto[] = product.images.map((image, i) => ({
-          type: 'photo',
-          media: image,
-          ...(i === 0 ? { caption: product.title.slice(0, 1024) } : {}),
-        }));
-        await ctx.replyWithMediaGroup(media);
+        const batches: string[][] = [];
+        for (let i = 0; i < product.images.length; i += 10) {
+          batches.push(product.images.slice(i, i + 10));
+        }
+        for (let b = 0; b < batches.length; b++) {
+          const media: InputMediaPhoto[] = batches[b].map((image, i) => ({
+            type: 'photo',
+            media: image,
+            ...(b === 0 && i === 0 ? { caption: product.title.slice(0, 1024) } : {}),
+          }));
+          await ctx.replyWithMediaGroup(media);
+        }
       }
 
       await ctx.reply(buildInfoMessage(product), { parse_mode: 'HTML' });

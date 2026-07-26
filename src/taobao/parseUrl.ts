@@ -56,3 +56,13 @@ export function isShortLink(url: string): boolean {
 export function buildItemUrl(itemId: string): string {
   return `https://item.taobao.com/item.htm?id=${itemId}`;
 }
+
+/**
+ * Taobao share messages wrap the product title in Chinese corner brackets,
+ * e.g. 「ANTERIOR LOVED 超重工羊毛立领挺括带帽毛呢牛角扣长风衣」. Extracting it lets us
+ * search for the exact product without an extra paid lookup just to find its name.
+ */
+export function extractShareTitle(text: string): string | null {
+  const match = text.match(/「([^」]+)」/);
+  return match ? match[1].trim() : null;
+}

@@ -6,27 +6,42 @@ Telegram bot: send it a Taobao or Tmall product link, get back:
 - an English description (material, size, and other listed attributes)
 - the 5 latest reviews, translated to English
 
-Built to run indefinitely on free tiers only — no paid LLM calls. Translation
-uses the **Azure Translator free tier** (2,000,000 characters/month, free
-forever, not a trial). Product data comes from
-[parse.bot's Taobao API](https://parse.bot/marketplace) (free tier: 100
-requests/month) when configured, with a local Playwright scraper as a
-fallback.
+Translation uses the **Azure Translator free tier** (2,000,000 characters/month,
+free forever, not a trial) — no paid LLM calls. Product data comes from one of
+three sources, tried in order of data quality:
+
+1. **Apify's Taobao search actor** (best quality: full photo gallery + real
+   reviews, pay-per-event, ~$0.5-0.6/lookup) — used when the shared message
+   includes the product title
+2. **parse.bot's Taobao API** (free tier: 100 requests/month, but often only
+   1 photo/review per listing)
+3. A local Playwright scraper, as a last resort
 
 ## How it works
 
 1. You paste a `item.taobao.com` / `detail.tmall.com` / `tb.cn` link into the
-   chat.
-2. The bot resolves the link to a numeric item id and fetches the title,
-   images, attributes, description, and reviews — either from parse.bot's API
-   (recommended: it already runs from a Chinese vantage point, so it isn't
-   affected by Taobao's overseas-IP block or its login requirement) or, if
-   that's not configured, by scraping the page directly with a headless
-   Chromium (Playwright) that stays running across requests.
+   chat (forwarding the original Taobao share message works best - see below).
+2. The bot resolves the link to a numeric item id, then fetches the title,
+   images, attributes, and reviews from whichever configured source ranks
+   highest (see above).
 3. All Chinese text is translated to English via the Azure Translator API.
 4. Everything is cached on disk per product id for `CACHE_TTL_HOURS` (default
-   12h), so re-sharing the same link doesn't re-fetch or re-spend translation
-   quota.
+   12h), so re-sharing the same link doesn't re-fetch or re-spend quota.
+
+### Why forwarding the original share message matters
+
+Taobao share messages wrap the product title in Chinese brackets, e.g.:
+
+```
+【淘宝】7天无理由退货 https://e.tb.cn/h.xxxxx?tk=xxxx
+「ANTERIOR LOVED 超重工羊毛立领挺括带帽毛呢牛角扣长风衣」
+```
+
+The Apify actor (source #1 above, the one with full photo galleries and real
+reviews) only supports keyword search, not direct item id/URL lookup - so the
+bot extracts that bracketed title and searches for it, then matches the
+result back to your item id. If you paste a bare link with no title text,
+the bot falls back to parse.bot or the local scraper instead.
 
 ## Setup
 
@@ -49,30 +64,40 @@ token into `TELEGRAM_BOT_TOKEN`.
 F0 gives 2,000,000 characters/month for free, permanently — no credit card
 charge as long as you stay on the free tier.
 
-### 3. parse.bot Taobao API key (recommended)
+### 3. Apify API token (best data quality)
 
-Taobao blocks/redirects requests from non-Chinese IPs and often requires a
-login for full item data — parse.bot's hosted API already handles this from
-their end, so you don't need your own China proxy or a Taobao account login.
+1. Sign up at [apify.com](https://apify.com) and add the
+   [Taobao Tmall Product Scraper](https://apify.com/zen-studio/taobao-search-scraper)
+   actor from the Store.
+2. Get an API token from
+   [console.apify.com/settings/integrations](https://console.apify.com/settings/integrations)
+   and put it in `APIFY_API_TOKEN`.
+
+This is pay-per-event (~$0.5-0.6 per lookup with reviews) — cheap for
+personal/occasional use, but not free. `APIFY_MAX_REVIEWS` (default 5)
+controls the review add-on cost. Every call is logged to `APIFY_LOG_PATH`
+(default `storage/logs/apify.jsonl`) as one JSON line per request (keyword,
+result count, whether it matched, cost-relevant fields) - useful both for
+debugging and as a reference if you want to build a self-hosted replacement
+later to cut the per-request cost.
+
+### 4. parse.bot Taobao API key (free fallback)
 
 1. Go to [parse.bot](https://parse.bot), sign in, find **"Taobao API"** in
    the marketplace, and **Subscribe** (free tier: 100 requests/month, 5/min).
 2. Copy your API key (gear icon in the top bar) into `PARSEBOT_API_KEY`.
 
-Without this key, the bot falls back to the local Playwright scraper (see
-step 5 and Known limitations below) — works, but less reliable.
-
-### 4. Install
+### 5. Install
 
 ```bash
 npm install        # also runs `playwright install --with-deps chromium`
 cp .env.example .env
-# fill in .env with the values from steps 1-3
+# fill in .env with the values from steps 1-4
 ```
 
-### 5. (Only needed without a parse.bot key) Save a logged-in Taobao session
+### 6. (Only needed without Apify/parse.bot configured) Save a logged-in Taobao session
 
-Skip this if you configured `PARSEBOT_API_KEY` above.
+Skip this if you configured `APIFY_API_TOKEN` or `PARSEBOT_API_KEY` above.
 
 Taobao aggressively rate-limits and blocks anonymous/headless traffic, and
 the reviews list in particular is often only served to logged-in sessions.
@@ -89,7 +114,7 @@ press Enter in the terminal. The bot picks up the session automatically on
 its next scrape, no file to copy. Re-run this occasionally if the session
 expires.
 
-### 6. Run
+### 7. Run
 
 ```bash
 npm run build
@@ -123,16 +148,22 @@ URL/webhook required). A couple of straightforward options:
 
 ## Known limitations
 
-- **parse.bot free tier** is capped at 100 requests/month, 5/min — the disk
-  cache helps stretch this, but heavy use will need a paid parse.bot tier.
-  Its review list may return fewer than 5 reviews depending on what Taobao
-  exposes for a given item.
-- **Without a parse.bot key**, the bot relies on scraping the rendered page
-  itself, which has no official API and is subject to Taobao's anti-bot
-  measures and its overseas-IP redirect (mitigated but not eliminated by a
-  `beforeunload` hook — see `src/taobao/scraper.ts`). If scraping starts
-  failing, refresh the login state (step 5) and check whether the CSS
-  selectors in `src/taobao/scraper.ts` still match the current page markup.
+- **Apify** only runs when the share text includes the bracketed product
+  title (see "Why forwarding the original share message matters" above), and
+  costs real money per lookup (~$0.5-0.6 with reviews) - not free like the
+  other two sources.
+- **parse.bot free tier** is capped at 100 requests/month, 5/min - the disk
+  cache helps stretch this. Its gallery/review extraction has been unreliable
+  for some listings (returning 1 photo/review even when more exist) despite
+  several rounds of fixes from their support agent.
+- **Without Apify or a parse.bot key**, the bot relies on scraping the
+  rendered page itself, which has no official API and is subject to Taobao's
+  anti-bot measures and its overseas-IP redirect (mitigated but not
+  eliminated by a `beforeunload` hook — see `src/taobao/scraper.ts`). Datacenter
+  proxies (even China-located ones) did not bypass this in testing - Taobao
+  appears to also detect non-residential IPs. If scraping starts failing,
+  refresh the login state (step 6) and check whether the CSS selectors in
+  `src/taobao/scraper.ts` still match the current page markup.
 - Translation quality depends on Azure Translator's zh→en model; it's solid
   for general text but won't always nail brand names or slang.
 

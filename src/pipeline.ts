@@ -1,6 +1,7 @@
 import { config } from './config';
-import { extractItemId } from './taobao/parseUrl';
+import { extractItemId, extractShareTitle } from './taobao/parseUrl';
 import { resolveShortLink, scrapeTaobaoProduct, ScrapedProduct } from './taobao/scraper';
+import { fetchProductViaApify, isApifyConfigured } from './taobao/apifyActor';
 import { fetchProductDetail, isParseBotConfigured } from './taobao/parsebotApi';
 import { translateToEnglish } from './translate/azureTranslate';
 import { readCache, writeCache } from './cache';
@@ -85,26 +86,42 @@ async function resolveItemId(url: string): Promise<string | null> {
  * with a cache layer so repeat requests for the same item cost neither a
  * fresh fetch nor fresh translation quota.
  *
- * Data source preference: parse.bot's Taobao API (fast, no browser, already
- * runs from a Chinese vantage point) when PARSEBOT_API_KEY is configured,
- * falling back to the local Playwright scraper otherwise or if it fails.
+ * Data source preference (best data quality first):
+ * 1. Apify's Taobao search actor - full photo gallery + real reviews, but
+ *    needs a search keyword, so only used when the share text includes the
+ *    product title (Taobao wraps it in 「...」).
+ * 2. parse.bot's Taobao API - cheap/free-tier, direct item id lookup, but
+ *    often only returns 1 photo/review for a given listing.
+ * 3. The local Playwright scraper, as a last resort.
  */
-export async function getProductInEnglish(url: string): Promise<ProductResult> {
+export async function getProductInEnglish(url: string, messageText?: string): Promise<ProductResult> {
   const itemId = await resolveItemId(url);
   if (itemId) {
     const cached = readCache<ProductResult>(itemId);
     if (cached) return cached;
   }
 
-  let scraped: ScrapedProduct;
-  if (itemId && isParseBotConfigured()) {
+  const shareTitle = messageText ? extractShareTitle(messageText) : null;
+
+  let scraped: ScrapedProduct | undefined;
+
+  if (itemId && shareTitle && isApifyConfigured()) {
+    try {
+      scraped = await fetchProductViaApify(itemId, shareTitle);
+    } catch (error) {
+      console.warn('Apify actor fetch failed, falling back:', error);
+    }
+  }
+
+  if (!scraped && itemId && isParseBotConfigured()) {
     try {
       scraped = await fetchProductDetail(itemId);
     } catch (error) {
       console.warn('parse.bot fetch failed, falling back to Playwright scraper:', error);
-      scraped = await scrapeTaobaoProduct(url);
     }
-  } else {
+  }
+
+  if (!scraped) {
     scraped = await scrapeTaobaoProduct(url);
   }
 

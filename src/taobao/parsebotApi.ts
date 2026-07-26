@@ -50,7 +50,7 @@ export async function fetchProductDetail(itemId: string): Promise<ScrapedProduct
         (src): src is string => !!src
       )
     )
-  ).slice(0, 9);
+  ).slice(0, 20);
 
   const props = Object.entries(d.specifications || {}).map(([name, value]) => ({
     name,
