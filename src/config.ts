@@ -44,5 +44,14 @@ export const config = {
 
   cacheTtlHours: Number(process.env.CACHE_TTL_HOURS || 12),
 
+  // Optional: parse.bot's Taobao API (https://parse.bot) - fetches product
+  // data via an API that already runs from a Chinese vantage point, avoiding
+  // the overseas-IP block and Taobao login entirely. When set, this is tried
+  // before falling back to the local Playwright scraper.
+  parseBotApiKey: process.env.PARSEBOT_API_KEY || '',
+  parseBotBaseUrl:
+    process.env.PARSEBOT_BASE_URL ||
+    'https://api.parse.bot/scraper/c09240ce-ae43-41b7-91ba-a8a2c7d2cb80',
+
   cacheDir: path.resolve('./storage/cache'),
 };

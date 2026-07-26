@@ -1,6 +1,7 @@
 import { config } from './config';
 import { extractItemId } from './taobao/parseUrl';
-import { scrapeTaobaoProduct, ScrapedProduct } from './taobao/scraper';
+import { resolveShortLink, scrapeTaobaoProduct, ScrapedProduct } from './taobao/scraper';
+import { fetchProductDetail, isParseBotConfigured } from './taobao/parsebotApi';
 import { translateToEnglish } from './translate/azureTranslate';
 import { readCache, writeCache } from './cache';
 
@@ -71,20 +72,43 @@ async function translateProduct(scraped: ScrapedProduct): Promise<ProductResult>
   };
 }
 
+async function resolveItemId(url: string): Promise<string | null> {
+  const quickId = extractItemId(url);
+  if (quickId) return quickId;
+
+  const resolvedUrl = await resolveShortLink(url);
+  return extractItemId(resolvedUrl);
+}
+
 /**
- * Full pipeline for a Taobao/Tmall product link: resolve -> scrape -> translate,
+ * Full pipeline for a Taobao/Tmall product link: resolve -> fetch -> translate,
  * with a cache layer so repeat requests for the same item cost neither a
- * fresh scrape nor fresh translation quota.
+ * fresh fetch nor fresh translation quota.
+ *
+ * Data source preference: parse.bot's Taobao API (fast, no browser, already
+ * runs from a Chinese vantage point) when PARSEBOT_API_KEY is configured,
+ * falling back to the local Playwright scraper otherwise or if it fails.
  */
 export async function getProductInEnglish(url: string): Promise<ProductResult> {
-  const quickId = extractItemId(url);
-  if (quickId) {
-    const cached = readCache<ProductResult>(quickId);
+  const itemId = await resolveItemId(url);
+  if (itemId) {
+    const cached = readCache<ProductResult>(itemId);
     if (cached) return cached;
   }
 
-  const scraped = await scrapeTaobaoProduct(url);
-  const cacheKey = scraped.itemId || quickId;
+  let scraped: ScrapedProduct;
+  if (itemId && isParseBotConfigured()) {
+    try {
+      scraped = await fetchProductDetail(itemId);
+    } catch (error) {
+      console.warn('parse.bot fetch failed, falling back to Playwright scraper:', error);
+      scraped = await scrapeTaobaoProduct(url);
+    }
+  } else {
+    scraped = await scrapeTaobaoProduct(url);
+  }
+
+  const cacheKey = scraped.itemId || itemId;
 
   if (cacheKey) {
     const cached = readCache<ProductResult>(cacheKey);

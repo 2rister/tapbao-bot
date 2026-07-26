@@ -8,21 +8,25 @@ Telegram bot: send it a Taobao or Tmall product link, get back:
 
 Built to run indefinitely on free tiers only — no paid LLM calls. Translation
 uses the **Azure Translator free tier** (2,000,000 characters/month, free
-forever, not a trial), and product data comes from scraping the product page
-directly with a real browser (Playwright) rather than a paid data API.
+forever, not a trial). Product data comes from
+[parse.bot's Taobao API](https://parse.bot/marketplace) (free tier: 100
+requests/month) when configured, with a local Playwright scraper as a
+fallback.
 
 ## How it works
 
 1. You paste a `item.taobao.com` / `detail.tmall.com` / `tb.cn` link into the
    chat.
-2. The bot resolves the link and scrapes the title, gallery images,
-   attributes table, description text, and (best-effort) the review list
-   using a headless Chromium (Playwright) that stays running and logged in
-   across requests, instead of relaunching for every message.
+2. The bot resolves the link to a numeric item id and fetches the title,
+   images, attributes, description, and reviews — either from parse.bot's API
+   (recommended: it already runs from a Chinese vantage point, so it isn't
+   affected by Taobao's overseas-IP block or its login requirement) or, if
+   that's not configured, by scraping the page directly with a headless
+   Chromium (Playwright) that stays running across requests.
 3. All Chinese text is translated to English via the Azure Translator API.
 4. Everything is cached on disk per product id for `CACHE_TTL_HOURS` (default
-   12h), so re-sharing the same link doesn't re-scrape Taobao or re-spend
-   translation quota.
+   12h), so re-sharing the same link doesn't re-fetch or re-spend translation
+   quota.
 
 ## Setup
 
@@ -45,15 +49,30 @@ token into `TELEGRAM_BOT_TOKEN`.
 F0 gives 2,000,000 characters/month for free, permanently — no credit card
 charge as long as you stay on the free tier.
 
-### 3. Install
+### 3. parse.bot Taobao API key (recommended)
+
+Taobao blocks/redirects requests from non-Chinese IPs and often requires a
+login for full item data — parse.bot's hosted API already handles this from
+their end, so you don't need your own China proxy or a Taobao account login.
+
+1. Go to [parse.bot](https://parse.bot), sign in, find **"Taobao API"** in
+   the marketplace, and **Subscribe** (free tier: 100 requests/month, 5/min).
+2. Copy your API key (gear icon in the top bar) into `PARSEBOT_API_KEY`.
+
+Without this key, the bot falls back to the local Playwright scraper (see
+step 5 and Known limitations below) — works, but less reliable.
+
+### 4. Install
 
 ```bash
 npm install        # also runs `playwright install --with-deps chromium`
 cp .env.example .env
-# fill in .env with the values from steps 1-2
+# fill in .env with the values from steps 1-3
 ```
 
-### 4. (Strongly recommended) Save a logged-in Taobao session
+### 5. (Only needed without a parse.bot key) Save a logged-in Taobao session
+
+Skip this if you configured `PARSEBOT_API_KEY` above.
 
 Taobao aggressively rate-limits and blocks anonymous/headless traffic, and
 the reviews list in particular is often only served to logged-in sessions.
@@ -70,7 +89,7 @@ press Enter in the terminal. The bot picks up the session automatically on
 its next scrape, no file to copy. Re-run this occasionally if the session
 expires.
 
-### 5. Run
+### 6. Run
 
 ```bash
 npm run build
@@ -82,6 +101,14 @@ or for local development with auto-reload:
 ```bash
 npm run dev
 ```
+
+## Restarting from Telegram
+
+If `TELEGRAM_OWNER_ID` is set in `.env` (get your numeric id from
+[@userinfobot](https://t.me/userinfobot)), a **🔄 Restart** button appears
+after `/start` for that user only. It closes the shared Playwright browser
+session so the next request starts fresh — handy if scraping gets stuck,
+without needing SSH access.
 
 ## Deployment
 
@@ -96,16 +123,16 @@ URL/webhook required). A couple of straightforward options:
 
 ## Known limitations
 
-- Taobao has no official public API for external developers, so this relies
-  on scraping the rendered page. Their anti-bot measures change over time —
-  if scraping starts failing, refresh the login state (step 4) and check
-  whether the CSS selectors in `src/taobao/scraper.ts` still match the
-  current page markup.
-- The reviews list is fetched by intercepting the page's own signed network
-  request client-side (no request signing is reimplemented), so it depends
-  on the page actually firing that request — this can fail silently on
-  layout changes. When it fails, the bot still returns photos + description,
-  just without reviews.
+- **parse.bot free tier** is capped at 100 requests/month, 5/min — the disk
+  cache helps stretch this, but heavy use will need a paid parse.bot tier.
+  Its review list may return fewer than 5 reviews depending on what Taobao
+  exposes for a given item.
+- **Without a parse.bot key**, the bot relies on scraping the rendered page
+  itself, which has no official API and is subject to Taobao's anti-bot
+  measures and its overseas-IP redirect (mitigated but not eliminated by a
+  `beforeunload` hook — see `src/taobao/scraper.ts`). If scraping starts
+  failing, refresh the login state (step 5) and check whether the CSS
+  selectors in `src/taobao/scraper.ts` still match the current page markup.
 - Translation quality depends on Azure Translator's zh→en model; it's solid
   for general text but won't always nail brand names or slang.
 
