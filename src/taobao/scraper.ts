@@ -15,16 +15,26 @@ export async function resolveShortLink(url: string): Promise<string> {
   if (!isShortLink(url)) return url;
 
   try {
-    const response = await axios.get(url, {
+    const response = await axios.get<string>(url, {
       maxRedirects: 10,
       timeout: 10000,
       headers: { 'User-Agent': MOBILE_UA },
       validateStatus: () => true,
+      responseType: 'text',
     });
+
     const finalUrl: string =
       (response.request as { res?: { responseUrl?: string } })?.res?.responseUrl || url;
-    const itemId = extractItemId(finalUrl);
-    return itemId ? buildItemUrl(itemId) : url;
+    const idFromRedirect = extractItemId(finalUrl);
+    if (idFromRedirect) return buildItemUrl(idFromRedirect);
+
+    // e.tb.cn often doesn't issue a real HTTP redirect - it returns 200 with
+    // an interstitial HTML page that embeds the real item link/id as plain
+    // text (e.g. in an "open in app" link), so fall back to scanning the body.
+    const bodyMatch = response.data?.match(/[?&]id=(\d+)/);
+    if (bodyMatch) return buildItemUrl(bodyMatch[1]);
+
+    return url;
   } catch {
     return url;
   }
