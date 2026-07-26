@@ -1,0 +1,28 @@
+{
+  "name": "tapbao-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot: paste a Taobao product link, get back photos, an English description (composition/size/etc), and the 5 latest reviews translated to English.",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "postinstall": "playwright install --with-deps chromium"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "playwright": "^1.49.1",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
