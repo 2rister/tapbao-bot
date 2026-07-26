@@ -1,6 +1,34 @@
+import axios from 'axios';
 import { chromium, BrowserContext, Page, Response as PWResponse } from 'playwright';
 import { config } from '../config';
-import { extractItemId } from './parseUrl';
+import { buildItemUrl, extractItemId, isShortLink } from './parseUrl';
+
+// A mobile UA makes e.tb.cn redirect to a URL carrying the item id in its
+// query string, instead of the app-open interstitial desktop UAs get sent
+// to. This is a plain HTTP request (no browser), so it's cheap to try
+// before paying for a full Playwright navigation.
+const MOBILE_UA =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/124.0.0.0 Mobile Safari/537.36';
+
+async function resolveShortLink(url: string): Promise<string> {
+  if (!isShortLink(url)) return url;
+
+  try {
+    const response = await axios.get(url, {
+      maxRedirects: 10,
+      timeout: 10000,
+      headers: { 'User-Agent': MOBILE_UA },
+      validateStatus: () => true,
+    });
+    const finalUrl: string =
+      (response.request as { res?: { responseUrl?: string } })?.res?.responseUrl || url;
+    const itemId = extractItemId(finalUrl);
+    return itemId ? buildItemUrl(itemId) : url;
+  } catch {
+    return url;
+  }
+}
 
 export interface ScrapedReview {
   author?: string;
@@ -297,9 +325,10 @@ export async function closeSharedBrowser(): Promise<void> {
 export async function scrapeTaobaoProduct(url: string): Promise<ScrapedProduct> {
   const context = await getSharedContext();
   const page = await context.newPage();
+  const targetUrl = await resolveShortLink(url);
 
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
 
     const finalUrl = page.url();

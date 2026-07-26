@@ -51,3 +51,8 @@ export function isShortLink(url: string): boolean {
     return false;
   }
 }
+
+/** Builds the direct desktop item page URL, bypassing the short-link app-open interstitial. */
+export function buildItemUrl(itemId: string): string {
+  return `https://item.taobao.com/item.htm?id=${itemId}`;
+}
