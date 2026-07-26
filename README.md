@@ -8,14 +8,34 @@ Telegram bot: send it a Taobao or Tmall product link, get back:
 
 Translation uses the **Azure Translator free tier** (2,000,000 characters/month,
 free forever, not a trial) — no paid LLM calls. Product data comes from one of
-three sources, tried in order of data quality:
+four sources, tried in order of data quality:
 
+0. **A page you (or a friend) upload** - save the product page from your own
+   browser as `.html` or `.mhtml` and send that file to the bot instead of a
+   link. Completely free (no API call at all) since your browser already did
+   the work of loading the real page. See below.
 1. **Apify's Taobao search actor** (best quality: full photo gallery + real
    reviews, pay-per-event, ~$0.5-0.6/lookup) — used when the shared message
    includes the product title
 2. **parse.bot's Taobao API** (free tier: 100 requests/month, but often only
    1 photo/review per listing)
 3. A local Playwright scraper, as a last resort
+
+## Free option: upload a saved page instead of a link
+
+If you don't want every lookup to cost Apify credits (e.g. sharing the bot
+with friends), have them save the product page from their own browser and
+send the file to the bot instead of a link:
+
+- **Chrome/Edge**: open the product page → `⋮` menu → **Save and share** →
+  **Save page** → choose **Webpage, Single File** (produces a `.mhtml`)
+- Or **File → Save Page As…** → **Webpage, Complete** (produces a `.html`)
+
+Send that file to the bot as a Telegram document (not as a photo). It's
+parsed locally with no network calls to Taobao and no Apify/parse.bot cost -
+whatever the person's own browser could see (already past any geo-block or
+login wall on their end) is what the bot extracts. Reviews only come through
+if they were visible/loaded on the page before saving.
 
 ## How it works
 

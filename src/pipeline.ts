@@ -28,7 +28,7 @@ function withoutTranslation(scraped: ScrapedProduct): ProductResult {
   };
 }
 
-async function translateProduct(scraped: ScrapedProduct): Promise<ProductResult> {
+export async function translateProduct(scraped: ScrapedProduct): Promise<ProductResult> {
   if (!config.azureTranslatorKey) {
     console.warn('AZURE_TRANSLATOR_KEY not set - skipping translation, returning original text.');
     return withoutTranslation(scraped);
@@ -125,7 +125,14 @@ export async function getProductInEnglish(url: string, messageText?: string): Pr
     scraped = await scrapeTaobaoProduct(url);
   }
 
-  const cacheKey = scraped.itemId || itemId;
+  return finalizeProduct(scraped, itemId);
+}
+
+async function finalizeProduct(
+  scraped: ScrapedProduct,
+  fallbackItemId: string | null
+): Promise<ProductResult> {
+  const cacheKey = scraped.itemId || fallbackItemId;
 
   if (cacheKey) {
     const cached = readCache<ProductResult>(cacheKey);
@@ -139,4 +146,13 @@ export async function getProductInEnglish(url: string, messageText?: string): Pr
   }
 
   return result;
+}
+
+/**
+ * Translates and caches a product already scraped from a user-uploaded page
+ * archive (.html/.mhtml) - free, since it reuses whatever page the user's
+ * own browser already loaded (already past any geo-block/login wall).
+ */
+export async function getProductFromArchive(scraped: ScrapedProduct): Promise<ProductResult> {
+  return finalizeProduct(scraped, null);
 }
